@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { storage, Shoe } from '@/lib/storage';
 import { ArrowLeft, Trash2, Check, X } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,12 +20,14 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
+type Shoe = Tables<'shoes'>;
+
 const ShoeDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { toast } = useToast();
   const [shoe, setShoe] = useState<Shoe | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
     name: '',
     brand: '',
@@ -34,75 +37,125 @@ const ShoeDetail = () => {
     occasion: '',
     type: '',
     purchaseDate: '',
-    image: '',
+    imageUrl: '',
   });
 
   useEffect(() => {
-    if (!storage.isLoggedIn()) {
-      navigate('/');
-      return;
-    }
-    if (id) {
-      const foundShoe = storage.getShoeById(id);
-      if (foundShoe) {
-        setShoe(foundShoe);
-        setFormData({
-          name: foundShoe.name,
-          brand: foundShoe.brand,
-          price: foundShoe.price.toString(),
-          size: foundShoe.size,
-          color: foundShoe.color,
-          occasion: foundShoe.occasion,
-          type: foundShoe.type,
-          purchaseDate: foundShoe.purchaseDate,
-          image: foundShoe.image,
-        });
-      } else {
-        navigate('/dashboard');
+    const checkAuthAndFetch = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        navigate('/');
+        return;
       }
-    }
+
+      if (id) {
+        await fetchShoe();
+      }
+    };
+
+    checkAuthAndFetch();
   }, [id, navigate]);
 
-  const handleWoreToday = () => {
-    if (shoe) {
-      storage.addWearLog(shoe.id);
-      const updatedShoe = storage.getShoeById(shoe.id);
-      if (updatedShoe) {
-        setShoe(updatedShoe);
-      }
-      toast({
-        title: "Logged!",
-        description: `You wore ${shoe.name} today.`,
+  const fetchShoe = async () => {
+    if (!id) return;
+    
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('shoes')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      toast.error('Shoe not found');
+      navigate('/dashboard');
+    } else {
+      setShoe(data);
+      setFormData({
+        name: data.name,
+        brand: data.brand,
+        price: data.price?.toString() || '',
+        size: data.size || '',
+        color: data.color || '',
+        occasion: data.occasion || '',
+        type: data.type || '',
+        purchaseDate: data.purchase_date || '',
+        imageUrl: data.image_url || '',
       });
+    }
+    setLoading(false);
+  };
+
+  const handleWoreToday = async () => {
+    if (!shoe) return;
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { error: logError } = await supabase.from('wear_logs').insert({
+      user_id: user.id,
+      shoe_id: shoe.id,
+    });
+
+    if (logError) {
+      toast.error('Failed to log wear');
+      return;
+    }
+
+    const { error: updateError } = await supabase
+      .from('shoes')
+      .update({ wear_count: shoe.wear_count + 1 })
+      .eq('id', shoe.id);
+
+    if (updateError) {
+      toast.error('Failed to update wear count');
+    } else {
+      setShoe({ ...shoe, wear_count: shoe.wear_count + 1 });
+      toast.success(`Logged wear for ${shoe.name}`);
     }
   };
 
-  const handleDelete = () => {
-    if (shoe) {
-      storage.deleteShoe(shoe.id);
-      toast({
-        title: "Shoe deleted",
-        description: `${shoe.name} has been removed from your collection.`,
-      });
+  const handleDelete = async () => {
+    if (!shoe) return;
+
+    const { error } = await supabase
+      .from('shoes')
+      .delete()
+      .eq('id', shoe.id);
+
+    if (error) {
+      toast.error('Failed to delete shoe');
+    } else {
+      toast.success('Shoe deleted');
       navigate('/dashboard');
     }
   };
 
-  const handleSave = () => {
-    if (shoe) {
-      storage.updateShoe(shoe.id, {
-        ...formData,
-        price: parseFloat(formData.price) || 0,
-      });
-      const updatedShoe = storage.getShoeById(shoe.id);
-      if (updatedShoe) {
-        setShoe(updatedShoe);
-      }
+  const handleSave = async () => {
+    if (!shoe) return;
+
+    const { error } = await supabase
+      .from('shoes')
+      .update({
+        name: formData.name,
+        brand: formData.brand,
+        price: formData.price ? parseFloat(formData.price) : null,
+        size: formData.size || null,
+        color: formData.color || null,
+        occasion: formData.occasion || null,
+        type: formData.type || null,
+        purchase_date: formData.purchaseDate || null,
+        image_url: formData.imageUrl || null,
+      })
+      .eq('id', shoe.id);
+
+    if (error) {
+      toast.error('Failed to update shoe');
+    } else {
+      await fetchShoe();
       setIsEditing(false);
-      toast({
-        title: "Shoe updated",
-        description: "Your changes have been saved.",
-      });
+      toast.success('Shoe updated');
     }
   };
 
@@ -110,6 +163,7 @@ const ShoeDetail = () => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  if (loading) return <div className="min-h-screen flex items-center justify-center">Loading...</div>;
   if (!shoe) return null;
 
   return (
@@ -127,9 +181,9 @@ const ShoeDetail = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card className="overflow-hidden">
             <div className="aspect-square bg-muted">
-              {shoe.image ? (
+              {shoe.image_url ? (
                 <img 
-                  src={shoe.image} 
+                  src={shoe.image_url} 
                   alt={shoe.name}
                   className="w-full h-full object-cover"
                 />
@@ -163,7 +217,7 @@ const ShoeDetail = () => {
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete shoe?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              This action cannot be undone. This will permanently delete this shoe and all wear logs.
+                              This action cannot be undone.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -181,93 +235,45 @@ const ShoeDetail = () => {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="name">Name</Label>
-                      <Input
-                        id="name"
-                        name="name"
-                        value={formData.name}
-                        onChange={handleChange}
-                      />
+                      <Input id="name" name="name" value={formData.name} onChange={handleChange} />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="brand">Brand</Label>
-                      <Input
-                        id="brand"
-                        name="brand"
-                        value={formData.brand}
-                        onChange={handleChange}
-                      />
+                      <Input id="brand" name="brand" value={formData.brand} onChange={handleChange} />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="price">Price</Label>
-                        <Input
-                          id="price"
-                          name="price"
-                          type="number"
-                          step="0.01"
-                          value={formData.price}
-                          onChange={handleChange}
-                        />
+                        <Input id="price" name="price" type="number" step="0.01" value={formData.price} onChange={handleChange} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="size">Size</Label>
-                        <Input
-                          id="size"
-                          name="size"
-                          value={formData.size}
-                          onChange={handleChange}
-                        />
+                        <Input id="size" name="size" value={formData.size} onChange={handleChange} />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="color">Color</Label>
-                        <Input
-                          id="color"
-                          name="color"
-                          value={formData.color}
-                          onChange={handleChange}
-                        />
+                        <Input id="color" name="color" value={formData.color} onChange={handleChange} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="occasion">Occasion</Label>
-                        <Input
-                          id="occasion"
-                          name="occasion"
-                          value={formData.occasion}
-                          onChange={handleChange}
-                        />
+                        <Input id="occasion" name="occasion" value={formData.occasion} onChange={handleChange} />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label htmlFor="type">Type</Label>
-                        <Input
-                          id="type"
-                          name="type"
-                          value={formData.type}
-                          onChange={handleChange}
-                        />
+                        <Input id="type" name="type" value={formData.type} onChange={handleChange} />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="purchaseDate">Purchase Date</Label>
-                        <Input
-                          id="purchaseDate"
-                          name="purchaseDate"
-                          type="date"
-                          value={formData.purchaseDate}
-                          onChange={handleChange}
-                        />
+                        <Input id="purchaseDate" name="purchaseDate" type="date" value={formData.purchaseDate} onChange={handleChange} />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="image">Image URL</Label>
-                      <Input
-                        id="image"
-                        name="image"
-                        value={formData.image}
-                        onChange={handleChange}
-                      />
+                      <Label htmlFor="imageUrl">Image URL</Label>
+                      <Input id="imageUrl" name="imageUrl" value={formData.imageUrl} onChange={handleChange} />
                     </div>
                     <div className="flex gap-2 pt-2">
                       <Button onClick={handleSave} className="flex-1">
@@ -289,11 +295,11 @@ const ShoeDetail = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div>
                         <p className="text-sm text-muted-foreground">Price</p>
-                        <p className="font-medium">${shoe.price}</p>
+                        <p className="font-medium">${shoe.price?.toFixed(2) || '0.00'}</p>
                       </div>
                       <div>
                         <p className="text-sm text-muted-foreground">Size</p>
-                        <p className="font-medium">{shoe.size}</p>
+                        <p className="font-medium">{shoe.size || 'N/A'}</p>
                       </div>
                     </div>
                     {shoe.color && (
@@ -314,15 +320,15 @@ const ShoeDetail = () => {
                         <p className="font-medium">{shoe.type}</p>
                       </div>
                     )}
-                    {shoe.purchaseDate && (
+                    {shoe.purchase_date && (
                       <div>
                         <p className="text-sm text-muted-foreground">Purchase Date</p>
-                        <p className="font-medium">{new Date(shoe.purchaseDate).toLocaleDateString()}</p>
+                        <p className="font-medium">{new Date(shoe.purchase_date).toLocaleDateString()}</p>
                       </div>
                     )}
                     <div className="pt-4">
                       <p className="text-sm text-muted-foreground mb-2">Wear Count</p>
-                      <p className="text-3xl font-bold text-accent">{shoe.wearCount}</p>
+                      <p className="text-3xl font-bold text-accent">{shoe.wear_count}</p>
                     </div>
                   </div>
                 )}

@@ -2,32 +2,54 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { storage, WearLog as WearLogType, Shoe } from '@/lib/storage';
 import { ArrowLeft } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import type { Tables } from '@/integrations/supabase/types';
 
-interface WearLogWithShoe extends WearLogType {
-  shoe: Shoe | null;
+type WearLog = Tables<'wear_logs'>;
+type Shoe = Tables<'shoes'>;
+
+interface WearLogWithShoe extends WearLog {
+  shoes: Shoe | null;
 }
 
 const WearLog = () => {
   const navigate = useNavigate();
   const [logs, setLogs] = useState<WearLogWithShoe[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!storage.isLoggedIn()) {
-      navigate('/');
-      return;
-    }
-    const wearLogs = storage.getWearLogs();
-    const logsWithShoes = wearLogs.map(log => ({
-      ...log,
-      shoe: storage.getShoeById(log.shoeId),
-    })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    setLogs(logsWithShoes);
+    const checkAuthAndFetch = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        navigate('/');
+        return;
+      }
+
+      await fetchLogs();
+    };
+
+    checkAuthAndFetch();
   }, [navigate]);
 
+  const fetchLogs = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('wear_logs')
+      .select('*, shoes(*)')
+      .order('worn_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching wear logs:', error);
+    } else {
+      setLogs(data || []);
+    }
+    setLoading(false);
+  };
+
   const groupedLogs = logs.reduce((acc, log) => {
-    const date = new Date(log.date).toLocaleDateString();
+    const date = new Date(log.worn_at).toLocaleDateString();
     if (!acc[date]) {
       acc[date] = [];
     }
@@ -49,7 +71,9 @@ const WearLog = () => {
       <main className="container mx-auto px-4 py-8 max-w-3xl">
         <h1 className="text-3xl font-bold mb-6">Wear History</h1>
 
-        {logs.length === 0 ? (
+        {loading ? (
+          <p className="text-center text-muted-foreground">Loading...</p>
+        ) : logs.length === 0 ? (
           <Card className="text-center py-12">
             <CardContent>
               <p className="text-muted-foreground text-lg">
@@ -67,14 +91,14 @@ const WearLog = () => {
                     <Card 
                       key={log.id}
                       className="cursor-pointer hover:shadow-md transition-shadow"
-                      onClick={() => log.shoe && navigate(`/shoe/${log.shoe.id}`)}
+                      onClick={() => log.shoes && navigate(`/shoe/${log.shoes.id}`)}
                     >
                       <CardContent className="flex items-center gap-4 py-4">
                         <div className="w-16 h-16 rounded bg-muted overflow-hidden flex-shrink-0">
-                          {log.shoe?.image ? (
+                          {log.shoes?.image_url ? (
                             <img 
-                              src={log.shoe.image} 
-                              alt={log.shoe.name}
+                              src={log.shoes.image_url} 
+                              alt={log.shoes.name}
                               className="w-full h-full object-cover"
                             />
                           ) : (
@@ -84,11 +108,11 @@ const WearLog = () => {
                           )}
                         </div>
                         <div className="flex-1">
-                          <h3 className="font-semibold">{log.shoe?.name || 'Unknown Shoe'}</h3>
-                          <p className="text-sm text-muted-foreground">{log.shoe?.brand}</p>
+                          <h3 className="font-semibold">{log.shoes?.name || 'Unknown Shoe'}</h3>
+                          <p className="text-sm text-muted-foreground">{log.shoes?.brand}</p>
                         </div>
                         <div className="text-sm text-muted-foreground">
-                          {new Date(log.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(log.worn_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </div>
                       </CardContent>
                     </Card>

@@ -2,23 +2,59 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
-import { storage, Shoe } from '@/lib/storage';
 import { Plus, LogOut, TrendingUp } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import type { Tables } from '@/integrations/supabase/types';
+
+type Shoe = Tables<'shoes'>;
 
 const Dashboard = () => {
   const [shoes, setShoes] = useState<Shoe[]>([]);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!storage.isLoggedIn()) {
-      navigate('/');
-      return;
-    }
-    setShoes(storage.getShoes());
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        navigate('/');
+        return;
+      }
+
+      await fetchShoes();
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (!session) {
+        navigate('/');
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, [navigate]);
 
-  const handleLogout = () => {
-    storage.logout();
+  const fetchShoes = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('shoes')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      toast.error('Failed to load shoes');
+      console.error(error);
+    } else {
+      setShoes(data || []);
+    }
+    setLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     navigate('/');
   };
 
@@ -52,7 +88,13 @@ const Dashboard = () => {
           </Button>
         </div>
 
-        {shoes.length === 0 ? (
+        {loading ? (
+          <Card className="text-center py-12">
+            <CardContent>
+              <p className="text-muted-foreground text-lg">Loading...</p>
+            </CardContent>
+          </Card>
+        ) : shoes.length === 0 ? (
           <Card className="text-center py-12">
             <CardContent>
               <p className="text-muted-foreground text-lg mb-4">
@@ -72,9 +114,9 @@ const Dashboard = () => {
                 onClick={() => navigate(`/shoe/${shoe.id}`)}
               >
                 <div className="aspect-square bg-muted overflow-hidden">
-                  {shoe.image ? (
+                  {shoe.image_url ? (
                     <img 
-                      src={shoe.image} 
+                      src={shoe.image_url} 
                       alt={shoe.name}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                     />
@@ -88,13 +130,13 @@ const Dashboard = () => {
                   <h3 className="font-semibold text-lg mb-1 truncate">{shoe.name}</h3>
                   <p className="text-sm text-muted-foreground mb-2">{shoe.brand}</p>
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{shoe.type}</span>
-                    <span className="font-medium">${shoe.price}</span>
+                    <span className="text-muted-foreground">{shoe.type || 'N/A'}</span>
+                    <span className="font-medium">${shoe.price?.toFixed(2) || '0.00'}</span>
                   </div>
                 </CardContent>
                 <CardFooter className="pt-0 pb-4">
                   <div className="w-full text-sm text-muted-foreground">
-                    Worn {shoe.wearCount} {shoe.wearCount === 1 ? 'time' : 'times'}
+                    Worn {shoe.wear_count} {shoe.wear_count === 1 ? 'time' : 'times'}
                   </div>
                 </CardFooter>
               </Card>
