@@ -14,7 +14,89 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      shoes: {
+        Row: {
+          brand: string
+          color: string | null
+          created_at: string
+          id: string
+          image_url: string | null
+          name: string
+          occasion: string | null
+          price: number | null
+          purchase_date: string | null
+          size: string | null
+          type: string | null
+          updated_at: string
+          user_id: string
+          wear_count: number
+        }
+        Insert: {
+          brand: string
+          color?: string | null
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          name: string
+          occasion?: string | null
+          price?: number | null
+          purchase_date?: string | null
+          size?: string | null
+          type?: string | null
+          updated_at?: string
+          user_id: string
+          wear_count?: number
+        }
+        Update: {
+          brand?: string
+          color?: string | null
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          name?: string
+          occasion?: string | null
+          price?: number | null
+          purchase_date?: string | null
+          size?: string | null
+          type?: string | null
+          updated_at?: string
+          user_id?: string
+          wear_count?: number
+        }
+        Relationships: []
+      }
+      wear_logs: {
+        Row: {
+          created_at: string
+          id: string
+          shoe_id: string
+          user_id: string
+          worn_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          shoe_id: string
+          user_id: string
+          worn_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          shoe_id?: string
+          user_id?: string
+          worn_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wear_logs_shoe_id_fkey"
+            columns: ["shoe_id"]
+            isOneToOne: false
+            referencedRelation: "shoes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
